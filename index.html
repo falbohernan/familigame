@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Demo WebXR Supermercado + Voz (A‑Frame)</title>
+  <!-- A‑Frame CDN -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <!-- A‑Frame Extras opcional (teleport + helpers). Descomentar si deseas.
+  <script src="https://unpkg.com/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script> -->
+  <style>
+    /* UI HTML superpuesta (overlay) */
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    #ui {
+      position: fixed; inset: 12px auto auto 12px; z-index: 9999;
+      background: rgba(0,0,0,.55); color: #fff; padding: 12px 14px; border-radius: 10px;
+      width: min(420px, 92vw); box-shadow: 0 6px 24px rgba(0,0,0,.25);
+      backdrop-filter: blur(6px);
+    }
+    #ui h1 { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
+    #ui .small { opacity: .85; font-size: 12px; line-height: 1.4; }
+    #ui button {
+      appearance: none; border: 0; border-radius: 10px; padding: 10px 14px;
+      background: #6b8afd; color: #fff; font-weight: 600; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(107,138,253,.35);
+    }
+    #ui button[disabled] { opacity:.5; cursor: not-allowed; }
+    #log {
+      margin-top: 8px; background: rgba(255,255,255,.08); padding: 8px 10px; border-radius: 8px; min-height: 62px;
+      font-size: 13px; white-space: pre-wrap;
+    }
+    #help { margin-top: 8px; font-size: 12px; opacity: .9; }
+    #toast { position: fixed; right: 12px; bottom: 12px; z-index: 9999; background: rgba(0,0,0,.75); color:#fff; padding:10px 12px; border-radius: 10px; display:none; }
+  </style>
+</head>
+<body>
+  <!-- Overlay de control de voz -->
+  <div id="ui">
+    <h1>🛒 Demo Supermercado + Voz</h1>
+    <div class="small">Di frases como: <b>“Hola”</b>, <b>“Quiero 3 manzanas”</b>, <b>“¿Cuánto sale?”</b>, <b>“Pagar con tarjeta”</b>, <b>“Gracias”</b>. Idioma: <code>es-AR</code>.</div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+      <button id="btnStart">🎙️ Iniciar micrófono</button>
+      <button id="btnStop" disabled>⏹️ Detener</button>
+      <button id="btnRepeat">🔊 Repetir última respuesta</button>
+    </div>
+    <div id="log" aria-live="polite">Esperando…</div>
+    <div id="help" class="small">
+      Consejos: concedé permiso al micrófono. Si tu navegador no soporta Web Speech API, podés usar sólo TTS o escribir comandos en la consola JS (<code>window.demoHandleText("Quiero 2 manzanas")</code>).
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <!-- Escena A‑Frame (WebXR listo para VR). Fallback: modo escritorio/2D. -->
+  <a-scene renderer="antialias: true; colorManagement: true;" background="color: #c7e0ff">
+    <!-- Iluminación -->
+    <a-entity light="type: ambient; intensity: 0.55"></a-entity>
+    <a-entity light="type: directional; intensity: 0.85" position="2 5 -2"></a-entity>
+
+    <!-- Piso -->
+    <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#dcdcdc"></a-plane>
+
+    <!-- Paredes simples -->
+    <a-box position="0 2 -10" depth="0.2" height="4" width="20" color="#f4f4f4"></a-box>
+    <a-box position="-10 2 0" depth="20" height="4" width="0.2" color="#f0f0f0"></a-box>
+    <a-box position="10 2 0" depth="20" height="4" width="0.2" color="#f0f0f0"></a-box>
+
+    <!-- Góndola / estantería -->
+    <a-box position="-2 1 -4" depth="1" height="2" width="4" color="#8d8d8d"></a-box>
+    <a-box position="-2 1.5 -4" depth="0.9" height="0.1" width="3.8" color="#bdbdbd"></a-box>
+    <a-box position="-2 1.0 -4" depth="0.9" height="0.1" width="3.8" color="#bdbdbd"></a-box>
+    <a-box position="-2 0.5 -4" depth="0.9" height="0.1" width="3.8" color="#bdbdbd"></a-box>
+
+    <!-- Productos: Manzanas (rojas) -->
+    <a-sphere class="producto manzana" position="-3 1.12 -3.7" radius="0.12" color="#c0392b"></a-sphere>
+    <a-sphere class="producto manzana" position="-2.6 1.12 -3.7" radius="0.12" color="#c0392b"></a-sphere>
+    <a-sphere class="producto manzana" position="-2.2 1.12 -3.7" radius="0.12" color="#c0392b"></a-sphere>
+    <a-sphere class="producto manzana" position="-1.8 1.12 -3.7" radius="0.12" color="#c0392b"></a-sphere>
+    <a-entity position="-2 1.35 -3.6" text="value: Manzanas $120 c/u; color: #111; align: center; width: 2.8;"></a-entity>
+
+    <!-- Caja / cajero -->
+    <a-box position="2 0.6 -2" depth="1.2" height="0.6" width="2.2" color="#5d6d7e"></a-box>
+    <a-entity id="cajero" position="2 1 -2">
+      <!-- Cuerpo simple del cajero (avatar estilizado) -->
+      <a-cylinder position="0 0.9 0" radius="0.25" height="1.2" color="#2c3e50"></a-cylinder>
+      <a-sphere position="0 1.7 0" radius="0.22" color="#f1c40f"></a-sphere>
+      <a-entity id="textoCajero" position="0 2 0" text="value: Bienvenido/a al súper. ¿En qué te ayudo?; color: #111; align: center; width: 4.2"></a-entity>
+    </a-entity>
+
+    <!-- Cámara + cursor -->
+    <a-entity id="rig" position="0 1.6 2">
+      <a-entity camera look-controls wasd-controls>
+        <a-entity cursor="fuse: false;" position="0 0 -1" geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.015" material="color: #222; shader: flat"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- Cielo ligero -->
+    <a-sky color="#c7e0ff"></a-sky>
+  </a-scene>
+
+<script>
+(function(){
+  const logEl = document.getElementById('log');
+  const btnStart = document.getElementById('btnStart');
+  const btnStop = document.getElementById('btnStop');
+  const btnRepeat = document.getElementById('btnRepeat');
+  const toast = document.getElementById('toast');
+  const textoCajero = document.querySelector('#textoCajero');
+
+  let recognizer = null;
+  let listening = false;
+  let lastReply = 'Hola, ¿qué necesitás?';
+
+  // Estado simple de carrito
+  const state = {
+    items: {}, // { manzana: cantidad }
+    precios: { manzana: 120 },
+    total(){
+      let t = 0;
+      for (const [k,v] of Object.entries(this.items)) t += (this.precios[k]||0)*v;
+      return t;
+    }
+  };
+
+  // Utilidad: hablar (TTS)
+  function speak(text){
+    lastReply = text;
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'es-AR';
+      u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch(e) {
+      console.warn('TTS no disponible', e);
+    }
+    textoCajero.setAttribute('text', 'value', text);
+    pushLog('🤖 ' + text);
+  }
+
+  // UI helper
+  function pushLog(s){
+    logEl.textContent = (logEl.textContent + '\n' + s).trim();
+  }
+  function showToast(msg){
+    toast.textContent = msg; toast.style.display = 'block';
+    setTimeout(()=> toast.style.display='none', 2200);
+  }
+
+  // Parser muy simple en español (keywords)
+  function parseCommand(raw){
+    const txt = raw.toLowerCase();
+    // Saludo
+    if (/hola|buen[oa]s/.test(txt)) return {type:'greet'};
+    // Pedidos: "quiero N manzanas" o "agregar X"
+    const ped = txt.match(/(quiero|agregar|dame)\s+(\d+)\s*(manzana|manzanas)/);
+    if (ped){
+      const cant = parseInt(ped[2],10) || 1;
+      return {type:'add', item:'manzana', qty: Math.max(1, Math.min(cant, 50))};
+    }
+    if (/manzana(s)?/.test(txt) && /(agregar|sumar|llevar|poner)/.test(txt)){
+      return {type:'add', item:'manzana', qty:1};
+    }
+    // Consultas de precio
+    if (/(cu[aá]nto|precio)/.test(txt)) return {type:'price'};
+    // Pagar
+    if (/(pagar|checkout|cobrar)/.test(txt)){
+      if (/tarjeta|cr[eé]dito|d[eé]bito/.test(txt)) return {type:'pay', method:'tarjeta'};
+      if (/efectivo|cash/.test(txt)) return {type:'pay', method:'efectivo'};
+      return {type:'pay'};
+    }
+    // Gracias / despedida
+    if (/gracias|chau|ad[ií]os/.test(txt)) return {type:'bye'};
+    return {type:'unknown'};
+  }
+
+  function handleIntent(intent){
+    switch(intent.type){
+      case 'greet':
+        speak('Hola, bienvenido al supermercado. Podés pedir por voz. Por ejemplo: quiero 3 manzanas.');
+        break;
+      case 'add':{
+        const k = intent.item; const q = intent.qty || 1;
+        state.items[k] = (state.items[k]||0) + q;
+        const tot = state.total();
+        speak(`Agregué ${q} ${q>1?'manzanas':'manzana'}. Llevás ${state.items[k]} en total. Monto parcial: $${tot}. ¿Deseás algo más?`);
+        break;
+      }
+      case 'price':{
+        const unit = state.precios.manzana;
+        speak(`Las manzanas valen $${unit} cada una. Llevás ${state.items.manzana||0}. Total parcial: $${state.total()}.`);
+        break;
+      }
+      case 'pay':{
+        const metodo = intent.method || 'tarjeta o efectivo';
+        const total = state.total();
+        if (!total) { speak('Aún no agregaste productos. Podés decir: quiero 2 manzanas.'); break; }
+        speak(`El total es $${total}. Podés pagar con ${metodo}. ¡Gracias por tu compra!`);
+        break;
+      }
+      case 'bye':
+        speak('Gracias por tu visita. ¡Hasta luego!');
+        break;
+      default:
+        speak('No entendí. Probá decir: quiero 2 manzanas, o ¿cuánto sale?, o pagar con tarjeta.');
+    }
+  }
+
+  // Manejar texto (desde STT o desde consola)
+  function handleText(text){
+    pushLog('🗣️ ' + text);
+    const intent = parseCommand(text);
+    handleIntent(intent);
+  }
+  window.demoHandleText = handleText; // para pruebas manuales
+
+  // STT: Web Speech API (Chrome/Edge). Safari móvil tiene limitaciones.
+  function initSTT(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showToast('STT no soportado. Usá Chrome/Edge de escritorio.'); btnStart.disabled = true; return null; }
+    const r = new SR();
+    r.lang = 'es-AR';
+    r.interimResults = false; r.continuous = false;
+
+    r.onstart = ()=> { listening = true; btnStart.disabled = true; btnStop.disabled = false; showToast('Escuchando…'); };
+    r.onend = ()=> { listening = false; btnStart.disabled = false; btnStop.disabled = true; showToast('Listo.'); };
+    r.onerror = (e)=> { showToast('Error STT: ' + (e && e.error || 'desconocido')); };
+    r.onresult = (ev)=>{
+      const text = (ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || '';
+      if (text) handleText(text);
+    };
+    return r;
+  }
+
+  recognizer = initSTT();
+
+  btnStart.addEventListener('click', ()=>{
+    try {
+      if (!recognizer) recognizer = initSTT();
+      recognizer && recognizer.start();
+    } catch(e){ showToast('No se pudo iniciar STT'); }
+  });
+  btnStop.addEventListener('click', ()=>{ try { recognizer && recognizer.stop(); } catch(_){} });
+  btnRepeat.addEventListener('click', ()=> speak(lastReply));
+
+  // Bienvenida por voz al cargar
+  setTimeout(()=> speak('Bienvenido. Decí: Hola, o Quiero 2 manzanas.'), 600);
+})();
+</script>
+</body>
+</html>
